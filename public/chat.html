@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Symfony Real-Time Chat</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      background: #f4f6f8;
+      margin: 0;
+      padding: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      height: 100vh;
+    }
+    header {
+      background: #0057ff;
+      color: white;
+      width: 100%;
+      text-align: center;
+      padding: 10px 0;
+      font-size: 1.2rem;
+    }
+    #chat {
+      width: 90%;
+      max-width: 600px;
+      background: white;
+      box-shadow: 0 0 10px rgba(0,0,0,0.1);
+      border-radius: 10px;
+      margin-top: 20px;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+    #messages {
+      flex: 1;
+      padding: 15px;
+      overflow-y: auto;
+      max-height: 400px;
+    }
+    .msg {
+      margin-bottom: 10px;
+      line-height: 1.4;
+    }
+    .msg b { color: #0057ff; }
+    .msg small { color: #888; font-size: 0.8rem; }
+    #input-area {
+      display: flex;
+      gap: 5px;
+      padding: 10px;
+      border-top: 1px solid #ddd;
+    }
+    input, select, button {
+      padding: 8px;
+      border: 1px solid #ccc;
+      border-radius: 5px;
+    }
+    input[type="text"] {
+      flex: 1;
+    }
+    button {
+      background: #0057ff;
+      color: white;
+      border: none;
+      cursor: pointer;
+      transition: 0.2s;
+    }
+    button:hover {
+      background: #0041cc;
+    }
+    #status {
+      font-size: 0.9rem;
+      color: #666;
+      text-align: center;
+      margin-top: 8px;
+    }
+  </style>
+</head>
+<body>
+  <header>💬 Symfony Real-Time Chat (Redis + WebSocket Fleet)</header>
+
+  <div id="chat">
+    <div style="padding: 10px; border-bottom: 1px solid #ddd;">
+      <label>Server:</label>
+      <select id="server">
+        <option value="8080">8080</option>
+        <option value="8081">8081</option>
+        <option value="8082">8082</option>
+      </select>
+      <label style="margin-left:10px;">Username:</label>
+      <input id="username" placeholder="Your name" value="">
+      <button onclick="connect()">Connect</button>
+    </div>
+
+    <div id="messages"></div>
+
+    <div id="input-area">
+      <input id="msg" type="text" placeholder="Type a message..." onkeypress="if(event.key==='Enter') send()">
+      <button onclick="send()">Send</button>
+    </div>
+  </div>
+
+  <div id="status">Not connected</div>
+
+  <script>
+    let ws;
+    let reconnectTimer;
+    let connectedPort;
+
+    function logMessage(user, text, server, time) {
+      const div = document.getElementById("messages");
+      const msg = document.createElement("div");
+      msg.className = "msg";
+      msg.innerHTML = `<b>${user}</b>: ${text} <small>${time} (${server})</small>`;
+      div.appendChild(msg);
+      div.scrollTop = div.scrollHeight;
+    }
+
+    function connect() {
+      if (ws && ws.readyState === WebSocket.OPEN) ws.close();
+
+      const port = document.getElementById("server").value;
+      const username = document.getElementById("username").value || "Anon";
+      connectedPort = port;
+
+      const url = `ws://localhost:${port}`;
+      ws = new WebSocket(url);
+      document.getElementById("status").innerText = `🔌 Connecting to ${url}...`;
+
+      ws.onopen = () => {
+        document.getElementById("status").innerText = `✅ Connected to ${url}`;
+        clearTimeout(reconnectTimer);
+      };
+
+      ws.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          logMessage(data.user, data.text, data.server, data.time);
+        } catch (e) {
+          console.log("Invalid message", event.data);
+        }
+      };
+
+      ws.onclose = () => {
+        document.getElementById("status").innerText = `❌ Disconnected from ${url}, retrying in 2s...`;
+        reconnectTimer = setTimeout(connect, 2000);
+      };
+
+      ws.onerror = (err) => {
+        console.error("WebSocket error:", err);
+        ws.close();
+      };
+    }
+
+    function send() {
+      const text = document.getElementById("msg").value.trim();
+      if (!text || !ws || ws.readyState !== WebSocket.OPEN) return;
+      const user = document.getElementById("username").value || "Anon";
+      ws.send(JSON.stringify({ user, text }));
+      document.getElementById("msg").value = "";
+    }
+  </script>
+</body>
+</html>
