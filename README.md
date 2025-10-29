@@ -1,4 +1,4 @@
-Symfony Real Time Chat System (PHP)
+[Symfony Real Time Chat System (PHP)
 -----------------------------------
 
 A simple real time chat application built using:
@@ -69,4 +69,4 @@ Running the Project
 Done
 -----------------------------------
 You now have a working multi server real time chat system on Ubuntu using
-Symfony, Ratchet, ReactPHP and Redis.
+Symfony, Ratchet, ReactPHP and Redis.](http://localhost:8000/chat.html)
