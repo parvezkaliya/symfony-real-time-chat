@@ -1,4 +1,5 @@
 <?php
+// src/Command/ChatServerCommand.php
 namespace App\Command;
 
 use Ratchet\MessageComponentInterface;
@@ -21,6 +22,7 @@ class ChatServerCommand extends Command implements MessageComponentInterface
     private $redisPub;
     private $redisSub;
     private string $channel = 'chat_channel';
+    private int $port;
 
     public function __construct()
     {
@@ -31,51 +33,57 @@ class ChatServerCommand extends Command implements MessageComponentInterface
     protected function configure()
     {
         $this
-            ->addArgument('port', InputArgument::OPTIONAL, 'Port for WebSocket', 8080)
-            ->addArgument('redis', InputArgument::OPTIONAL, 'Redis address', '127.0.0.1:6379');
+            ->addArgument('port', InputArgument::OPTIONAL, 'Port for WebSocket server', 8080)
+            ->addArgument('redis', InputArgument::OPTIONAL, 'Redis host:port', '127.0.0.1:6379');
     }
 
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
-        $port = (int)$input->getArgument('port');
+        $this->port = (int)$input->getArgument('port');
         $redisDsn = (string)$input->getArgument('redis');
 
         $loop = LoopFactory::create();
-
-        $output->writeln("🚀 Starting chat server on ws://localhost:{$port}");
-        $output->writeln("🔌 Connecting to Redis at {$redisDsn}");
+        $output->writeln("Starting chat server on ws://0.0.0.0:{$this->port}");
+        $output->writeln("Connecting to Redis at {$redisDsn}");
 
         $redisFactory = new RedisFactory($loop);
 
-        // Create publisher
+        // Create publisher client (async)
         $redisFactory->createClient($redisDsn)->then(function ($client) use ($output) {
             $this->redisPub = $client;
-            $output->writeln("✅ Redis publisher connected");
+            $output->writeln("Redis publisher connected");
+        }, function ($e) use ($output) {
+            $output->writeln("<error>Failed to create Redis publisher: {$e->getMessage()}</error>");
         });
 
-        // Create subscriber
+        // Create subscriber client (async)
         $redisFactory->createClient($redisDsn)->then(function ($client) use ($output) {
             $this->redisSub = $client;
-            $output->writeln("✅ Redis subscriber connected");
+            $output->writeln("Redis subscriber connected");
 
-            // Subscribe AFTER the client object exists
+            // Subscribe once connected
             $client->subscribe($this->channel)->then(function () use ($output) {
-                $output->writeln("📡 Subscribed to Redis channel '{$this->channel}'");
+                $output->writeln("Subscribed to channel '{$this->channel}'");
+            }, function ($e) use ($output) {
+                $output->writeln("<error>Subscribe failed: {$e->getMessage()}</error>");
             });
 
-            // Handle incoming messages from Redis
+            // When Redis sends messages, broadcast to all connected WebSocket clients
             $client->on('message', function ($channel, $message) use ($output) {
-                $output->writeln("Redis broadcast: $message");
-                foreach ($this->clients as $clientConn) {
-                    $clientConn->send($message);
+                $output->writeln("[Redis] Broadcast received on {$channel}");
+                foreach ($this->clients as $conn) {
+                    // send raw JSON string to clients
+                    $conn->send($message);
                 }
             });
+        }, function ($e) use ($output) {
+            $output->writeln("<error>Failed to create Redis subscriber: {$e->getMessage()}</error>");
         });
 
-        // Build Ratchet WebSocket server
+        // Build Ratchet WebSocket server integrated with the React loop
         $wsServer = new WsServer($this);
         $httpServer = new HttpServer($wsServer);
-        $socket = new ReactSocketServer("0.0.0.0:{$port}", $loop);
+        $socket = new ReactSocketServer("0.0.0.0:{$this->port}", $loop);
         new IoServer($httpServer, $socket, $loop);
 
         $loop->run();
@@ -86,27 +94,35 @@ class ChatServerCommand extends Command implements MessageComponentInterface
     public function onOpen(ConnectionInterface $conn)
     {
         $this->clients->attach($conn);
-        echo "[OPEN] New connection {$conn->resourceId}\n";
+        echo "[OPEN] Connection {$conn->resourceId}\n";
     }
 
     public function onMessage(ConnectionInterface $from, $msg)
     {
-        echo "[MSG] {$msg}\n";
+        // Expect JSON { user, text }
         $data = json_decode($msg, true);
-        if (!$data) return;
+        if (!is_array($data) || empty($data['text'])) {
+            $from->send(json_encode(['error' => 'invalid message']));
+            return;
+        }
 
         $payload = json_encode([
-            'user' => $data['user'] ?? 'Anon',
-            'text' => $data['text'] ?? '',
-            'server' => gethostname(),
-            'time' => date('H:i:s')
+            'user'   => $data['user'] ?? 'Anon',
+            'text'   => $data['text'],
+            'server' => gethostname() . ':' . $this->port,
+            'time'   => date('Y-m-d H:i:s'),
         ]);
 
-        // Publish to Redis if connected
+        // If redis publisher available, publish message (delivered to all servers)
         if ($this->redisPub) {
             $this->redisPub->publish($this->channel, $payload);
         } else {
-            echo "⚠️ Redis not yet connected, skipping publish\n";
+            // If Redis not ready, broadcast locally as fallback
+            foreach ($this->clients as $client) {
+                if ($client !== $from) {
+                    $client->send($payload);
+                }
+            }
         }
     }
 

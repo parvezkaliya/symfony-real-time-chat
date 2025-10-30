@@ -1,0 +1,36 @@
+{% extends 'base.html.twig' %}
+
+{% block title %}Real-Time Chat{% endblock %}
+
+{% block body %}
+<div style="max-width:700px;margin:0 auto">
+  <div style="margin-bottom:10px;padding:10px;border:1px solid #ddd;background:#fff;border-radius:6px;">
+    <label>Server:
+      <select id="server">
+        {% for port in servers %}
+          <option value="{{ port }}">{{ port }}</option>
+        {% endfor %}
+      </select>
+    </label>
+
+    <label style="margin-left:10px">Username:
+      <input id="username" value="User{{ random() }}" />
+    </label>
+
+    <button onclick="connect()" style="margin-left:10px;">Connect</button>
+  </div>
+
+  <div id="messages" style="height:360px;overflow:auto;border:1px solid #ddd;padding:10px;background:#fff;border-radius:6px;"></div>
+
+  <div style="margin-top:10px;display:flex;gap:8px;">
+    <input id="msg" style="flex:1;padding:8px" placeholder="Type message and press Enter or Send" onkeypress="if(event.key==='Enter') send()" />
+    <button onclick="send()">Send</button>
+  </div>
+
+  <div id="status" style="margin-top:8px;color:#666;">Not connected</div>
+</div>
+{% endblock %}
+
+{% block javascripts %}
+<script src="{{ asset('js/chat.js') }}"></script>
+{% endblock %}
